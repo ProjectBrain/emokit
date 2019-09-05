@@ -76,7 +76,7 @@ class EmotivExtraPacket(object):
                 data = self.raw_data
             else:
                 self.raw_data = data
-            self.counter = ord(data[0])
+            self.counter = data[0]
 
 
 class EmotivNewPacket(object):
@@ -115,10 +115,15 @@ class EmotivNewPacket(object):
 
         for name, sensor_bytes in sensors_16_bytes.items():
             # if sys.version_info >= (3, 0):
+            #value_1, value_2 = self.raw_data[sensor_bytes[0]], self.raw_data[sensor_bytes[1]]
+            #edk_value = value_1 * .128205128205129 + 4201.02564096001 + (value_2 - 128) * 32.82051289
+            #value = int(edk_value)
+
+
             whole, precision = self.raw_data[sensor_bytes[1]], self.raw_data[sensor_bytes[0]]
-            whole = whole / 0.031
+            whole = whole * 32 #/ 0.03125
             # print(whole)
-            precision = precision / 3.1
+            precision = precision * 32 / 100 - 4096 #/ 3.125
             # print(precision)
             value = whole + precision
             # print(value)
@@ -203,7 +208,11 @@ class EmotivOldPacket(object):
         # print([ord(c) for c in data])
         self.battery = None
         if self.counter > 127:
-            self.battery = battery_values[str(self.counter)]
+            if self.counter < len(battery_values):
+                self.battery = battery_values[str(self.counter)]
+            else:
+                pass
+                #print('ignoring weird battery value: ' + str(self.counter))
             self.counter = 128
         self.sync = self.counter == 0xe9
         self.sensors = sensors_mapping.copy()
@@ -238,7 +247,7 @@ class EmotivOldPacket(object):
 
         for name, bits in sensors_14_bits.items():
             if not 'GYRO' in name:
-                value = get_level(self.raw_data, bits, verbose)
+                value = get_level(self.raw_data, bits, verbose) - 8192
                 setattr(self, name, (value,))
                 self.sensors[name]['value'] = value
         self.quality_bit, self.quality_value = self.handle_quality(self.sensors, verbose)

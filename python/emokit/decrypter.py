@@ -14,7 +14,7 @@ from .util import crypto_key, new_crypto_key, epoc_plus_crypto_key
 
 class EmotivCrypto:
     def __init__(self, serial_number=None, is_research=False, verbose=False, force_epoc_mode=False,
-                 force_old_crypto=False):
+                 force_old_crypto=False, new_crypto=False, new_format=False):
         """
         Performs decryption of packets received. Stores decrypted packets in a Queue for use.
 
@@ -27,6 +27,8 @@ class EmotivCrypto:
         self._decrypted_queue = Queue()
         self.force_epoc_mode = force_epoc_mode
         self.force_old_crypto = force_old_crypto
+        self.new_crypto = new_crypto
+        self.new_format = new_format
         # Running state.
         self.running = False
         self.verbose = verbose
@@ -120,11 +122,13 @@ class EmotivCrypto:
         if verbose:
             print("EmotivCrypto: Serial Number - {serial_number}".format(serial_number=self.serial_number))
         # Create and return new AES class, using the serial number and headset version.
-        if self.serial_number.startswith('UD2016') and not self.force_old_crypto:
-            if self.force_epoc_mode:
-                return AES.new(epoc_plus_crypto_key(self.serial_number), AES.MODE_ECB, iv)
-            else:
+        #if self.serial_number.startswith('UD2016') and not self.force_old_crypto:
+        if self.new_crypto:
+        #if True:
+            if self.new_format:
                 return AES.new(new_crypto_key(self.serial_number, self.verbose))
+            else:
+                return AES.new(epoc_plus_crypto_key(self.serial_number), AES.MODE_ECB, iv)
         else:
             return AES.new(crypto_key(self.serial_number, self.is_research, verbose), AES.MODE_ECB, iv)
 

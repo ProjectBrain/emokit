@@ -10,7 +10,8 @@ if sys.version_info >= (3, 0):  # pragma: no cover
 
 
 def is_extra_data(data):
-    if ord(data[1]) == 32:
+    #if ord(data[1]) == 32:
+    if data[1] == 32:
         return True
     return False
 
@@ -49,10 +50,11 @@ def get_level(data, bits, verbose=False):
         level <<= 1
         b = (bits[i] // 8) + 1
         o = bits[i] % 8
-        bit_list.append(str(ord(data[b]) >> o & 1))
         if sys.version_info >= (3, 0):
+            bit_list.append(str(data[b] >> o & 1))
             level |= (data[b] >> o) & 1
         else:
+            bit_list.append(str(ord(data[b]) >> o & 1))
             level |= (ord(data[b]) >> o) & 1
             # print(level)
     # print(bit_list)
@@ -71,7 +73,7 @@ def get_level(data, bits, verbose=False):
     # level += precision / 0.51
     # level = level * 2
     # print((level) * 0.5151515151)
-    return level * 0.5151515151
+    return level# * 0.5151515151
 
 
 def get_gyro(data, bits, verbose=False):

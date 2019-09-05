@@ -56,9 +56,9 @@ class EmotivReader(object):
         else:
             self.reader = None
         self.data = Queue()
-        self.setup_platform[self.platform]()
         self.running = False
         self.stopped = True
+        self.setup_platform[self.platform]()
         if self.reader is not None:
             self.thread = Thread(target=self.run, kwargs={'source': self.reader})
         else:
@@ -97,7 +97,13 @@ class EmotivReader(object):
                         self.data.put_nowait(EmotivReaderTask(data=data, timestamp=datetime.now()))
                 except Exception as ex:
 
-                    print("Reader Error: {}".format(ex.message))
+                    print("Reader Error: {}".format(str(ex)))
+                    self.stop()
+                    #self.stop()
+                    #self.stopped = True
+                    #self.running = False
+                    #raise(ex)
+                    #sys.exit(1)
                     # Catching StopIteration for some reason stops at the second record,
                     #  even though there are more results.
             else:

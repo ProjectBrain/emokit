@@ -5,7 +5,9 @@ import os
 import sys
 from datetime import datetime
 from threading import Thread, Lock
-from time import time
+import threading
+import traceback 
+from time import time, sleep
 
 from .decrypter import EmotivCrypto
 from .output import EmotivOutput
@@ -52,6 +54,8 @@ class Emotiv(object):
         """
         print("Initializing Emokit...")
         self.new_format = False
+        self.new_crypto = False
+        self.invalidcount = 0
         self.running = False
         self.chunk_writes = chunk_writes
         self.chunk_size = chunk_size
@@ -106,10 +110,13 @@ class Emotiv(object):
         # Setup emokit loop thread. This thread coordinates the work done from the reader to be decrypted and queued
         # into EmotivPackets.
         self.output = None
-        self.thread = Thread(target=self.run)
+        #self.thread = Thread(target=self.run)
+        self.thread = Thread(target=self.catch_run)
         self._stop_signal = False
         self.thread.setDaemon(True)
+        #print('prestart')
         self.start()
+        #print('poststart')
 
     def initialize_output(self):
         print("Initializing Output Thread...")
@@ -183,7 +190,7 @@ class Emotiv(object):
         print("Initializing Crypto Thread...")
         if self.read_encrypted:
             self.crypto = EmotivCrypto(self.serial_number, self.is_research, verbose=self.verbose,
-                                       force_epoc_mode=self.force_epoc_mode, force_old_crypto=self.force_old_crypto)
+                                       force_epoc_mode=self.force_epoc_mode, force_old_crypto=self.force_old_crypto, new_crypto=self.new_crypto, new_format=self.new_format)
 
     def start(self):
         """
@@ -197,9 +204,9 @@ class Emotiv(object):
         Stops emotiv
         :return:
         """
-        if self.reader is not None:
+        if self.reader is not None and self.reader.running: 
             self.reader.stop()
-        if self.crypto is not None:
+        if self.crypto is not None and self.crypto.running:
             self.crypto.stop()
         if self.decrypted_writer is not None:
             self.decrypted_writer.stop()
@@ -225,6 +232,16 @@ class Emotiv(object):
         if self.display_output and self.verbose:
             print("Log: %s" % message)
 
+    def catch_run(self):
+        try:
+            return self.run()
+        except Exception as e:
+            traceback.print_tb(e.__traceback__)
+            #traceback.print_exc(e)
+            self.stop()
+            self.running = False
+            #raise(e)
+
     def run(self):
         """ Do not call explicitly, called upon initialization of class or self.start()
             The main emokit loop.
@@ -232,8 +249,9 @@ class Emotiv(object):
         :param crypto: EmotivCrypto class
         """
         self.initialize_reader()
-        if self.serial_number.startswith("UD2016") and not self.force_epoc_mode:
-            self.new_format = True
+        #if True:
+        #if self.serial_number.startswith("UD2016") and not self.force_epoc_mode:
+        #    self.new_format = True
         self.initialize_writer()
         self.initialize_crypto()
         self.initialize_output()
@@ -249,7 +267,10 @@ class Emotiv(object):
         self.lock.acquire()
         while self.running:
             self.lock.release()
-            if not self.reader.data.empty():
+            if self.reader.data.empty():
+                wasempty = True
+            else:
+                wasempty = False
                 try:
                     reader_task = self.reader.data.get()
                 except KeyboardInterrupt:
@@ -325,17 +346,61 @@ class Emotiv(object):
                                                                 timestamp=decrypted_task.timestamp))
                     self.packets_processed += 1
                     extra_data = False
-                    if self.new_format:
+                    d = decrypted_task.data
+                    #print(decrypted_task.data.hex())
+                    #print(d[-3:-1] is [0x7e,0x7e])
+                    #print(d[14], d[15], d[16])
+                    if (d[1] in [0x20, 0x10]):
+                        if self.invalidcount == 0:
+                            print('valid 1')
+                            print(decrypted_task.data.hex())
+                        valid = True
+                        self.invalidcount = 1
+                        #print(decrypted_task.data.hex())
+                    #elif (d[16] == 0x00)
+                    #elif (d[15] == 0x00 and d[16] in [0x01, 0x02, 0x03]):
+                    elif (d[15] == 0x00):
+                    #elif (d[-3] == 0x7e and d[-2] == 0x7e):
+                        if self.invalidcount == 0:
+                            print('valid 2')
+                            print(decrypted_task.data.hex())
+                        valid = True
+                        self.invalidcount = 1
+                        #print(decrypted_task.data.hex())
+                    else:
+                        valid = False
+                        print(decrypted_task.data.hex())
+                        #print('invalid')
+                        self.invalidcount += 1
+                        #if False:
+                    if self.invalidcount == 20:
+                        if not self.new_format and not self.new_crypto:
+                            self.new_format = True
+                            self.new_crypto = True
+                        elif self.new_format and self.new_crypto:
+                            self.new_crypto = False
+                        elif self.new_format and not self.new_crypto:
+                            self.new_format = False
+                            self.new_crypto = True
+                        else:
+                            self.invalidcount = 21
+
+                        print('new crypto', self.new_crypto, 'new format', self.new_format)
+                        self.crypto.stop()
+                        self.initialize_crypto()
+                        self.crypto.start()
+                        self.invalidcount = 0
+
+                    if self.new_format and valid:
                         extra_data = is_extra_data(decrypted_task.data)
                         if extra_data:
                             new_packet = EmotivExtraPacket(decrypted_task.data, timestamp=decrypted_task.timestamp)
                         else:
-                            if self.force_epoc_mode:
-                                new_packet = EmotivOldPacket(decrypted_task.data, timestamp=decrypted_task.timestamp)
-                            else:
-                                new_packet = EmotivNewPacket(decrypted_task.data, timestamp=decrypted_task.timestamp)
-                    else:
+                            new_packet = EmotivNewPacket(decrypted_task.data, timestamp=decrypted_task.timestamp)
+                    elif valid:
                         new_packet = EmotivOldPacket(decrypted_task.data, timestamp=decrypted_task.timestamp)
+                    else:
+                        new_packet = EmotivExtraPacket(decrypted_task.data, timestamp=decrypted_task.timestamp)
                     # print(new_packet.counter)
                     # data = []
                     # for c in new_packet.raw_data:
@@ -383,6 +448,7 @@ class Emotiv(object):
                 if packets_received_since_last_update == 1 or packets_received_since_last_update == 0:
                     stale_rx += 1
                 last_packets_received = self.packets_received
+                #if self.reader.stopped:
                 if restarting_reader and self.reader.stopped:
                     print("Restarting Reader")
                     stale_rx = 0
@@ -395,7 +461,16 @@ class Emotiv(object):
                     self.reader.stop()
                     restarting_reader = True
 
+            if not self.reader.running and not restarting_reader:
+                self.stop()
+                #print([t for t in threading.enumerate()])
+
+            elif not self.crypto.running:
+                self.stop()
+
             self.lock.acquire()
+            #if self.reader.stopped or self.crypto.stopped:
+            #    self.stop()
             if self._stop_signal:
                 should_stop = True
                 if self.reader.running:
@@ -415,8 +490,12 @@ class Emotiv(object):
                 if self.output is not None:
                     if self.output.running:
                         should_stop = False
+                #print('should stop', should_stop)
                 if should_stop:
                     self.running = False
+
+            #if wasempty:
+            #    sleep(0.000001)
 
     def dequeue(self):
         """
